@@ -1,0 +1,52 @@
+name: Build iOS (unsigned IPA)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  ios:
+    runs-on: macos-15
+    env:
+      QT_VERSION: "6.8.3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Qt (macOS host tools + iOS)
+        run: |
+          python3 -m pip install aqtinstall
+          python3 -m aqt install-qt mac desktop "$QT_VERSION" clang_64 -O "$HOME/Qt"
+          python3 -m aqt install-qt mac ios "$QT_VERSION" ios -O "$HOME/Qt"
+          ls "$HOME/Qt/$QT_VERSION"
+
+      - name: Configure (CMake + Xcode)
+        run: |
+          HOST_QT=$(ls -d "$HOME/Qt/$QT_VERSION/macos" "$HOME/Qt/$QT_VERSION/clang_64" 2>/dev/null | head -1)
+          echo "Host Qt: $HOST_QT"
+          "$HOME/Qt/$QT_VERSION/ios/bin/qt-cmake" -S . -B build -G Xcode \
+            -DQT_HOST_PATH="$HOST_QT" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+
+      - name: Build (without code signing)
+        run: |
+          cmake --build build --config Release -- \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Package IPA
+        run: |
+          APP=$(find build -type d -name "*.app" -path "*Release-iphoneos*" | head -1)
+          echo "App: $APP"
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qr ios_calculator.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios_calculator-ipa
+          path: ios_calculator.ipa
