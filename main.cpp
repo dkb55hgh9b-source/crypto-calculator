@@ -21,6 +21,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QLocale>
+#include <QMargins>
 #include <QMouseEvent>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -28,6 +29,7 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPushButton>
+#include <QScreen>
 #include <QScrollArea>
 #include <QScroller>
 #include <QSettings>
@@ -35,26 +37,27 @@
 #include <QTime>
 #include <QTimer>
 #include <QUrl>
+#include <QWindow>
 #include <QVBoxLayout>
 #include <QVariantAnimation>
 #include <QVector>
 #include <algorithm>
 #include <cmath>
 #include <functional>
-
+ 
 #include "calculator_engine.h"
 #include "expr_tracker.h"
 #include "units.h"
-
+ 
 using E = CalcEngine;
-
+ 
 // ============================================================================
 //  Клавиша: скруглённый прямоугольник с градиентом, тенью и подсветкой при наведении
 // ============================================================================
 class CalcButton : public QAbstractButton {
 public:
     enum Kind { Digit, Function, Operator, Scientific, Accent };
-
+ 
     CalcButton(const QString& text, Kind kind, QWidget* parent)
         : QAbstractButton(parent), kind_(kind) {
         setText(text);
@@ -76,19 +79,19 @@ public:
         });
         connect(this, &QAbstractButton::released, this, [this] { fade_.start(); });
     }
-
+ 
     void setHighlighted(bool on) {
         if (on != highlighted_) { highlighted_ = on; update(); }
     }
     void setLeftAligned(bool on) { leftAligned_ = on; }
-
+ 
     // Подсветка при вводе с клавиатуры
     void flash() {
         fade_.stop();
         press_ = 1.0;
         fade_.start();
     }
-
+ 
 protected:
     bool event(QEvent* e) override {
         switch (e->type()) {
@@ -100,12 +103,12 @@ protected:
         }
         return QAbstractButton::event(e);
     }
-
+ 
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
         p.setRenderHint(QPainter::TextAntialiasing);
-
+ 
         QColor top, bottom, border, fg;
         switch (kind_) {
             case Digit:
@@ -131,7 +134,7 @@ protected:
         const QString t = text();
         if (kind_ == Function && (t == QLatin1String("AC") || t == QLatin1String("C")))
             fg = QColor(0xFF, 0x7A, 0x85);
-
+ 
         if (underMouse()) { top = top.lighter(112); bottom = bottom.lighter(112); }
         auto mix = [](const QColor& a, const QColor& b, double k) {
             return QColor(int(a.red() + (b.red() - a.red()) * k),
@@ -140,29 +143,29 @@ protected:
         };
         top = mix(top, Qt::white, 0.16 * press_);
         bottom = mix(bottom, Qt::white, 0.16 * press_);
-
+ 
         // «объём»: тень под клавишей, при нажатии клавиша опускается
         const double w = width(), h = height();
         const double depth = std::max(2.0, h * 0.045);
         const QRectF face(0, press_ * depth * 0.7, w, h - depth);
         const double rad = std::min(face.width(), face.height()) * 0.30;
-
+ 
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(0, 0, 0, 110));
         p.drawRoundedRect(QRectF(0, depth, w, face.height()), rad, rad);
-
+ 
         QLinearGradient grad(face.topLeft(), face.bottomLeft());
         grad.setColorAt(0, top);
         grad.setColorAt(1, bottom);
         p.setBrush(grad);
         p.setPen(QPen(border, 1));
         p.drawRoundedRect(face.adjusted(0.5, 0.5, -0.5, -0.5), rad, rad);
-
+ 
         double k = 0.40;
         if (kind_ == Function) k = 0.34;
         if (kind_ == Operator || kind_ == Accent) k = 0.46;
         if (kind_ == Scientific) k = 0.32;
-
+ 
         QFont f = font();
         int px = std::max(8, int(face.height() * k));
         f.setPixelSize(px);
@@ -176,7 +179,7 @@ protected:
             p.drawText(face, Qt::AlignCenter, t);
         }
     }
-
+ 
 private:
     Kind kind_;
     bool highlighted_ = false;
@@ -184,14 +187,14 @@ private:
     double press_ = 0.0;
     QVariantAnimation fade_;
 };
-
+ 
 // ============================================================================
 //  Кнопка с нарисованной иконкой: калькулятор / стрелки обмена ⇅
 // ============================================================================
 class IconButton : public QAbstractButton {
 public:
     enum Glyph { Swap, History };
-
+ 
     IconButton(Glyph g, QWidget* parent) : QAbstractButton(parent), glyph_(g) {
         setCursor(Qt::PointingHandCursor);
         setFocusPolicy(Qt::NoFocus);
@@ -199,7 +202,7 @@ public:
     }
     void setBackground(bool on) { bg_ = on; update(); }
     void setAccent(bool on) { accent_ = on; update(); }
-
+ 
 protected:
     bool event(QEvent* e) override {
         switch (e->type()) {
@@ -211,7 +214,7 @@ protected:
         }
         return QAbstractButton::event(e);
     }
-
+ 
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
@@ -219,7 +222,7 @@ protected:
         const double s = std::min(r.width(), r.height());
         const QPointF c = r.center();
         const QRectF body = r.adjusted(0.5, 0.5, -0.5, -0.5);
-
+ 
         const bool accentFill = bg_ && accent_;
         if (bg_) {
             if (accent_) {
@@ -240,7 +243,7 @@ protected:
                                      : (accent_ ? QColor(0x9A, 0x8D, 0xFF) : QColor(0xB9, 0xC2, 0xD4));
         p.setPen(QPen(fg, std::max(1.8, s * 0.07), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
-
+ 
         if (glyph_ == History) {
             const double rad = s * 0.27;
             p.drawEllipse(c, rad, rad);
@@ -258,28 +261,28 @@ protected:
             p.drawLine(QPointF(c.x() + dx, c.y() + h), QPointF(c.x() + dx + a, c.y() + h - a));
         }
     }
-
+ 
 private:
     Glyph glyph_;
     bool bg_ = false;
     bool accent_ = false;
 };
-
+ 
 // ============================================================================
 //  Переключатель режимов («Калькулятор | Конвертер»)
 // ============================================================================
 class Segmented : public QWidget {
 public:
     std::function<void(int)> onChange;
-
+ 
     Segmented(const QStringList& items, QWidget* parent) : QWidget(parent), items_(items) {
         setCursor(Qt::PointingHandCursor);
     }
-
+ 
     void setCurrent(int i) {
         if (i != cur_) { cur_ = i; update(); }
     }
-
+ 
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
@@ -289,7 +292,7 @@ protected:
         p.setPen(QPen(QColor(0x27, 0x2C, 0x37), 1));
         p.setBrush(QColor(0x1B, 0x1F, 0x27));
         p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), r.height() / 2, r.height() / 2);
-
+ 
         const int n = std::max(1, int(items_.size()));
         const double w = r.width() / n;
         QFont f = font();
@@ -310,7 +313,7 @@ protected:
             p.drawText(cell, Qt::AlignCenter, items_[i]);
         }
     }
-
+ 
     void mousePressEvent(QMouseEvent* e) override {
         const int n = std::max(1, int(items_.size()));
         const int i = std::clamp(int(e->pos().x() / (double(width()) / n)), 0, n - 1);
@@ -320,25 +323,25 @@ protected:
             if (onChange) onChange(i);
         }
     }
-
+ 
 private:
     QStringList items_;
     int cur_ = 0;
 };
-
+ 
 // Надпись, по которой можно кликнуть (выбор единицы)
 class ClickLabel : public QLabel {
 public:
     using QLabel::QLabel;
     std::function<void()> onClick;
-
+ 
 protected:
     void mousePressEvent(QMouseEvent* e) override {
         if (onClick) onClick();
         QLabel::mousePressEvent(e);
     }
 };
-
+ 
 // ============================================================================
 //  Курсы валют: официальный курс НБУ (bank.gov.ua), обновление каждые 10 минут.
 //  Берутся ВСЕ валюты НБУ; курсы хранятся в QSettings, поэтому без сети
@@ -349,7 +352,7 @@ struct CurrencyInfo {
     QString name;
     double rate = 0;  // сколько гривен стоит 1 единица валюты
 };
-
+ 
 class RateTracker : public QObject {
 public:
     QVector<CurrencyInfo> list;
@@ -357,7 +360,7 @@ public:
     QString status;                   // "обновлено 14:05" или текст ошибки
     bool failed = false;
     std::function<void()> onUpdate;
-
+ 
     explicit RateTracker(QObject* parent) : QObject(parent) {
         QSettings s;
         nbuDate = s.value("date").toString();
@@ -375,7 +378,7 @@ public:
         timer_.start();
         refresh();
     }
-
+ 
     double rateOf(const QString& cc) const {
         for (const CurrencyInfo& c : list)
             if (c.cc == cc) return c.rate;
@@ -384,7 +387,7 @@ public:
     double usd() const { return rateOf(QStringLiteral("USD")); }
     double eur() const { return rateOf(QStringLiteral("EUR")); }
     bool ready() const { return usd() > 0 && eur() > 0; }
-
+ 
     void refresh() {
         QNetworkRequest req(QUrl(QStringLiteral("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json")));
         req.setHeader(QNetworkRequest::UserAgentHeader, "IOSCalculator/1.0");
@@ -401,14 +404,14 @@ public:
                 qWarning() << "Курсы НБУ:" << why;
                 return fail(why);
             }
-
+ 
             QVector<CurrencyInfo> fresh;
             CurrencyInfo uah;
             uah.cc = QStringLiteral("UAH");
             uah.name = QStringLiteral("Українська гривня");
             uah.rate = 1.0;
             fresh.push_back(uah);
-
+ 
             QString date;
             const QJsonArray arr = QJsonDocument::fromJson(reply->readAll()).array();
             for (const QJsonValue& v : arr) {
@@ -427,7 +430,7 @@ public:
                 if (c.cc == QLatin1String("EUR")) ne = c.rate;
             }
             if (nu <= 0 || ne <= 0) return fail(QStringLiteral("ошибка данных"));
-
+ 
             std::sort(fresh.begin(), fresh.end(), [](const CurrencyInfo& a, const CurrencyInfo& b) {
                 const int pa = priority(a.cc), pb = priority(b.cc);
                 return pa != pb ? pa < pb : a.cc < b.cc;
@@ -436,7 +439,7 @@ public:
             nbuDate = date;
             failed = false;
             status = QStringLiteral("обновлено ") + QTime::currentTime().toString("HH:mm");
-
+ 
             QJsonArray out;
             for (const CurrencyInfo& c : list) {
                 QJsonObject o;
@@ -451,24 +454,24 @@ public:
             if (onUpdate) onUpdate();
         });
     }
-
+ 
 private:
     static int priority(const QString& cc) {  // популярные валюты — в начале списка
         static const QStringList first = {"UAH", "USD", "EUR", "PLN", "GBP", "CHF", "CAD", "CZK", "JPY", "CNY", "TRY"};
         const int i = first.indexOf(cc);
         return i < 0 ? 1000 : i;
     }
-
+ 
     void fail(const QString& why) {
         failed = true;
         status = why;
         if (onUpdate) onUpdate();
     }
-
+ 
     QNetworkAccessManager nam_;
     QTimer timer_;
 };
-
+ 
 // ============================================================================
 //  Криптовалюты: BTC, ETH, BNB, SOL, TRX, HYPE, GRAM (бывший Toncoin) с CoinGecko
 //  (публичный API без ключа), цены в USD, обновление каждые 5 минут.
@@ -481,14 +484,14 @@ struct CryptoInfo {
     double usd = 0;      // цена в долларах
     double change = 0;   // изменение за 24 часа, %
 };
-
+ 
 class CryptoTracker : public QObject {
 public:
     QVector<CryptoInfo> list;
     QString status;  // "обновлено 14:05" или текст ошибки
     bool failed = false;
     std::function<void()> onUpdate;
-
+ 
     explicit CryptoTracker(QObject* parent) : QObject(parent) {
         QSettings s;
         const QJsonArray arr = QJsonDocument::fromJson(s.value("crypto").toString().toUtf8()).array();
@@ -506,13 +509,13 @@ public:
         timer_.start();
         refresh();
     }
-
+ 
     double usdOf(const QString& symbol) const {
         for (const CryptoInfo& c : list)
             if (c.symbol == symbol) return c.usd;
         return 0;
     }
-
+ 
     void refresh() {
         QNetworkRequest req(QUrl(QStringLiteral(
             "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&sparkline=false"
@@ -532,7 +535,7 @@ public:
                 qWarning() << "Крипто (CoinGecko):" << why;
                 return fail(why);
             }
-
+ 
             QVector<CryptoInfo> fresh;
             QVector<double> caps;  // капитализация — чтобы при совпадении тикеров выбрать настоящую монету
             const QJsonArray arr = QJsonDocument::fromJson(reply->readAll()).array();
@@ -549,7 +552,7 @@ public:
                 }
                 const double cap = o.value(QStringLiteral("market_cap")).toDouble();
                 if (!isTracked(ci.symbol) || ci.usd <= 0) continue;
-
+ 
                 int found = -1;
                 for (int i = 0; i < fresh.size(); ++i)
                     if (fresh[i].symbol == ci.symbol) found = i;
@@ -565,11 +568,11 @@ public:
                 return order(a.symbol) < order(b.symbol);
             });
             if (fresh.isEmpty()) return fail(QStringLiteral("ошибка данных"));
-
+ 
             list = fresh;
             failed = false;
             status = QStringLiteral("обновлено ") + QTime::currentTime().toString("HH:mm");
-
+ 
             QJsonArray out;
             for (const CryptoInfo& c : list) {
                 QJsonObject o;
@@ -584,7 +587,7 @@ public:
             if (onUpdate) onUpdate();
         });
     }
-
+ 
 private:
     static const QStringList& tracked() {
         static const QStringList t = {"BTC", "ETH", "BNB", "SOL", "TRX", "HYPE", "GRAM"};
@@ -592,17 +595,17 @@ private:
     }
     static bool isTracked(const QString& symbol) { return tracked().contains(symbol); }
     static int order(const QString& symbol) { return tracked().indexOf(symbol); }
-
+ 
     void fail(const QString& why) {
         failed = true;
         status = why;
         if (onUpdate) onUpdate();
     }
-
+ 
     QNetworkAccessManager nam_;
     QTimer timer_;
 };
-
+ 
 // ============================================================================
 //  Главное окно
 // ============================================================================
@@ -610,12 +613,12 @@ enum class A {
     Digit, Decimal, Clear, Negate, Percent, Binary, Equals, LParen, RParen,
     MClear, MAdd, MSub, MRecall, Second, Unary, Const, EE, Angle
 };
-
+ 
 struct Act {
     A a = A::Digit;
     int arg = 0;
 };
-
+ 
 struct Key {
     CalcButton* btn = nullptr;
     QString label, label2;
@@ -624,19 +627,19 @@ struct Key {
     bool sci = false;
     int r = 0, c = 0, span = 1;
 };
-
+ 
 struct UnitItem {
     QString id;
     QString name;
     QString info;  // доп. строка в списке (для крипто: цена и изменение за 24 ч)
 };
-
+ 
 // Выбор одной строки конвертера: категория + единица. Верхняя и нижняя строки выбираются независимо.
 struct Sel {
     int cat = 0;  // 0 — валюты, 1 — крипто, дальше — категории из units.h
     QString id;
 };
-
+ 
 // Запись истории: вычисление («2 + 3 × 4» = «14») или конвертация («100 USD» = «4 125,00 UAH»)
 struct HistoryItem {
     bool conv = false;
@@ -648,7 +651,7 @@ struct HistoryItem {
     QString from, to;
     qint64 ts = 0;
 };
-
+ 
 class Calculator : public QWidget {
 public:
     Calculator() : rates_(this), crypto_(this) {
@@ -659,7 +662,7 @@ public:
         QPalette pal = palette();
         pal.setColor(QPalette::Window, Qt::black);
         setPalette(pal);
-
+ 
         // --- обычный дисплей ---
         display_ = new QLabel(QStringLiteral("0"), this);
         display_->setAlignment(Qt::AlignRight | Qt::AlignBottom);
@@ -667,20 +670,20 @@ public:
         QFont df = display_->font();
         df.setWeight(QFont::Light);
         display_->setFont(df);
-
+ 
         // --- переключатель режимов (калькулятор | конвертер) ---
         seg_ = new Segmented({QStringLiteral("Калькулятор"), QStringLiteral("Конвертер")}, this);
         seg_->onChange = [this](int i) { setConverter(i == 1); };
-
+ 
         exprLabel_ = new QLabel(this);
         exprLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         exprLabel_->setStyleSheet(QStringLiteral("color: #8A93A6; background: transparent;"));
-
+ 
         // --- кнопка истории (слева вверху) ---
         historyBtn_ = new IconButton(IconButton::History, this);
         historyBtn_->setBackground(true);
         connect(historyBtn_, &QAbstractButton::clicked, this, [this] { openHistory(); });
-
+ 
         // --- дисплей конвертера: две строки ---
         topVal_ = new QLabel(this);
         bottomVal_ = new QLabel(this);
@@ -692,7 +695,7 @@ public:
         }
         topVal_->setStyleSheet(QStringLiteral("color: #F4F6FA; background: transparent;"));
         bottomVal_->setStyleSheet(QStringLiteral("color: #F4F6FA; background: transparent;"));
-
+ 
         topUnit_ = new ClickLabel(this);
         bottomUnit_ = new ClickLabel(this);
         for (ClickLabel* l : {topUnit_, bottomUnit_}) {
@@ -702,7 +705,7 @@ public:
         }
         topUnit_->onClick = [this] { openPicker(true); };
         bottomUnit_->onClick = [this] { openPicker(false); };
-
+ 
         swapBtn_ = new IconButton(IconButton::Swap, this);
         swapBtn_->setBackground(true);
         swapBtn_->setAccent(true);
@@ -712,26 +715,26 @@ public:
             refresh();
             scheduleConvCommit();
         });
-
+ 
         defaultPair(0, from_, to_);  // по умолчанию USD → UAH
-
+ 
         rates_.onUpdate = [this] { refresh(); };
         crypto_.onUpdate = [this] { refresh(); };
-
+ 
         loadHistory();
         convTimer_.setSingleShot(true);
         connect(&convTimer_, &QTimer::timeout, this, [this] { commitConversion(); });
-
+ 
         for (QWidget* w : converterWidgets()) w->hide();
-
+ 
         buildKeys();
         refresh();
         resize(390, 780);
     }
-
+ 
 protected:
     void resizeEvent(QResizeEvent*) override { layoutKeys(); }
-
+ 
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
@@ -739,7 +742,7 @@ protected:
         bg.setColorAt(0, QColor(0x0D, 0x0F, 0x13));
         bg.setColorAt(1, QColor(0x17, 0x1B, 0x22));
         p.fillRect(rect(), bg);
-
+ 
         auto card = [&](const QRectF& r, bool active) {
             QLinearGradient g(r.topLeft(), r.bottomLeft());
             g.setColorAt(0, QColor(0x1D, 0x21, 0x2A));
@@ -755,7 +758,7 @@ protected:
             card(cardBottom_, false);
         }
     }
-
+ 
     void keyPressEvent(QKeyEvent* e) override {
         const int k = e->key();
         if (k >= Qt::Key_0 && k <= Qt::Key_9 && !(e->modifiers() & Qt::ControlModifier))
@@ -786,17 +789,17 @@ protected:
             default: QWidget::keyPressEvent(e);
         }
     }
-
+ 
 private:
     CalcEngine eng_;
     RateTracker rates_;
     CryptoTracker crypto_;
-
+ 
     QLabel* display_ = nullptr;
     Segmented* seg_ = nullptr;
     QLabel* exprLabel_ = nullptr;
     QRectF cardRect_, cardTop_, cardBottom_;  // карточки дисплея
-
+ 
     // режим конвертера
     bool converter_ = false;
     Sel from_, to_;               // верхняя и нижняя строки выбираются независимо
@@ -806,21 +809,21 @@ private:
     ClickLabel* bottomUnit_ = nullptr;
     IconButton* swapBtn_ = nullptr;
     int convFont_ = 40;
-
+ 
     // история
     QVector<HistoryItem> history_;
     IconButton* historyBtn_ = nullptr;
     QTimer convTimer_;       // записывает конвертацию, когда ввод остановился
     ExprTracker tracker_;    // собирает текст выражения для истории
-
+ 
     QVector<Key> keys_;
     bool second_ = false;
     int maxFont_ = 80;
-
+ 
     QVector<QWidget*> converterWidgets() const {
         return {topVal_, bottomVal_, topUnit_, bottomUnit_, swapBtn_};
     }
-
+ 
     // ---------- построение клавиатуры ----------
     int add(const QString& label, CalcButton::Kind kind, Act act, int r, int c,
             int span = 1, bool sci = false, const QString& label2 = QString(),
@@ -839,42 +842,42 @@ private:
         connect(key.btn, &QAbstractButton::clicked, this, [this, idx] { press(idx); });
         return idx;
     }
-
+ 
     void sci(const QString& label, int r, int c, Act act,
              const QString& label2 = QString(), Act act2 = Act()) {
         add(label, CalcButton::Scientific, act, r, c, 1, true, label2, act2, !label2.isEmpty());
     }
-
+ 
     void buildKeys() {
         using K = CalcButton;
         const QString dec = QString::fromUtf8(E::kDecimal);
-
+ 
         // Основная клавиатура (позиции в портретной сетке 5×4)
         add("AC", K::Function, {A::Clear}, 0, 0);
         add(QString::fromUtf8("+/\u2212"), K::Function, {A::Negate}, 0, 1);
         add("%", K::Function, {A::Percent}, 0, 2);
         add(QString::fromUtf8("\u00F7"), K::Operator, {A::Binary, E::Div}, 0, 3);
-
+ 
         add("7", K::Digit, {A::Digit, 7}, 1, 0);
         add("8", K::Digit, {A::Digit, 8}, 1, 1);
         add("9", K::Digit, {A::Digit, 9}, 1, 2);
         add(QString::fromUtf8("\u00D7"), K::Operator, {A::Binary, E::Mul}, 1, 3);
-
+ 
         add("4", K::Digit, {A::Digit, 4}, 2, 0);
         add("5", K::Digit, {A::Digit, 5}, 2, 1);
         add("6", K::Digit, {A::Digit, 6}, 2, 2);
         add(QString::fromUtf8("\u2212"), K::Operator, {A::Binary, E::Sub}, 2, 3);
-
+ 
         add("1", K::Digit, {A::Digit, 1}, 3, 0);
         add("2", K::Digit, {A::Digit, 2}, 3, 1);
         add("3", K::Digit, {A::Digit, 3}, 3, 2);
         add("+", K::Operator, {A::Binary, E::Add}, 3, 3);
-
+ 
         const int zero = add("0", K::Digit, {A::Digit, 0}, 4, 0, 2);
         keys_[zero].btn->setLeftAligned(true);
         add(dec, K::Digit, {A::Decimal}, 4, 2);
         add("=", K::Accent, {A::Equals}, 4, 3);
-
+ 
         // Научные клавиши (ландшафт, 5 строк × 6 столбцов слева)
         sci("(", 0, 0, {A::LParen});
         sci(")", 0, 1, {A::RParen});
@@ -882,7 +885,7 @@ private:
         sci("m+", 0, 3, {A::MAdd});
         sci(QString::fromUtf8("m\u2212"), 0, 4, {A::MSub});
         sci("mr", 0, 5, {A::MRecall});
-
+ 
         sci("2nd", 1, 0, {A::Second});
         sci(QString::fromUtf8("x\u00B2"), 1, 1, {A::Unary, E::Square});
         sci(QString::fromUtf8("x\u00B3"), 1, 2, {A::Unary, E::Cube});
@@ -891,7 +894,7 @@ private:
             QString::fromUtf8("y\u02E3"), {A::Binary, E::Pow});
         sci(QString::fromUtf8("10\u02E3"), 1, 5, {A::Unary, E::Exp10},
             QString::fromUtf8("2\u02E3"), {A::Unary, E::Exp2});
-
+ 
         sci(QString::fromUtf8("\u00B9\u2044\u2093"), 2, 0, {A::Unary, E::Inv});
         sci(QString::fromUtf8("\u00B2\u221Ax"), 2, 1, {A::Unary, E::Sqrt});
         sci(QString::fromUtf8("\u00B3\u221Ax"), 2, 2, {A::Unary, E::Cbrt});
@@ -900,7 +903,7 @@ private:
             QString::fromUtf8("log\u1D67"), {A::Binary, E::LogY});
         sci(QString::fromUtf8("log\u2081\u2080"), 2, 5, {A::Unary, E::Log10},
             QString::fromUtf8("log\u2082"), {A::Unary, E::Log2});
-
+ 
         const QString inv = QString::fromUtf8("\u207B\u00B9");
         sci("x!", 3, 0, {A::Unary, E::Fact});
         sci("sin", 3, 1, {A::Unary, E::Sin}, "sin" + inv, {A::Unary, E::Asin});
@@ -908,7 +911,7 @@ private:
         sci("tan", 3, 3, {A::Unary, E::Tan}, "tan" + inv, {A::Unary, E::Atan});
         sci("e", 3, 4, {A::Const, E::E});
         sci("EE", 3, 5, {A::EE});
-
+ 
         sci("Rad", 4, 0, {A::Angle});
         sci("sinh", 4, 1, {A::Unary, E::Sinh}, "sinh" + inv, {A::Unary, E::Asinh});
         sci("cosh", 4, 2, {A::Unary, E::Cosh}, "cosh" + inv, {A::Unary, E::Acosh});
@@ -916,21 +919,26 @@ private:
         sci(QString::fromUtf8("\u03C0"), 4, 4, {A::Const, E::Pi});
         sci("Rand", 4, 5, {A::Const, E::Rand});
     }
-
+ 
     // ---------- раскладка ----------
     void layoutKeys() {
-        const int W = width(), H = height();
-        const bool land = W > H;
+        // безопасная зона: вырез/Dynamic Island сверху, индикатор «домой» снизу, боковые вырезы в ландшафте
+        const QMargins ins = safeInsets();
+        const int X0 = ins.left(), Y0 = ins.top();
+        const int W = width() - ins.left() - ins.right();
+        const int H = height() - ins.top() - ins.bottom();
+        const bool land = width() > height();
+        auto place = [&](QWidget* w, int x, int y, int ww, int hh) { w->setGeometry(x + X0, y + Y0, ww, hh); };
         const int minSide = std::min(W, H);
         const int m = std::max(14, int(minSide * (land ? 0.035 : 0.045)));
         const int g = std::max(8, int(minSide * (land ? 0.022 : 0.026)));
-
+ 
         // --- шапка: переключатель режимов и кнопка истории ---
         const int hh = land ? 34 : 40;
         const int y0 = land ? 8 : 14;
-        seg_->setGeometry(m, y0, std::min(W - 2 * m - hh - 10, 300), hh);
-        historyBtn_->setGeometry(W - m - hh, y0, hh, hh);
-
+        place(seg_, m, y0, std::min(W - 2 * m - hh - 10, 300), hh);
+        place(historyBtn_, W - m - hh, y0, hh, hh);
+ 
         // --- клавиатура ---
         int top;
         if (!land) {
@@ -941,7 +949,7 @@ private:
                 k.btn->setVisible(!k.sci);
                 if (k.sci) continue;
                 const int w = k.span * bw + (k.span - 1) * g;
-                k.btn->setGeometry(m + k.c * (bw + g), top + k.r * (bh + g), w, bh);
+                place(k.btn, m + k.c * (bw + g), top + k.r * (bh + g), w, bh);
             }
         } else {
             const int bw = (W - 2 * m - 9 * g) / 10;
@@ -951,58 +959,99 @@ private:
                 k.btn->setVisible(true);
                 const int col = k.sci ? k.c : k.c + 6;
                 const int w = k.span * bw + (k.span - 1) * g;
-                k.btn->setGeometry(m + col * (bw + g), top + k.r * (bh + g), w, bh);
+                place(k.btn, m + col * (bw + g), top + k.r * (bh + g), w, bh);
             }
         }
-
+ 
         // --- карточка дисплея ---
         const int cardY = y0 + hh + 12;
         const int cardH = std::max(60, top - 14 - cardY);
         const int cw = W - 2 * m;
         const int pad = 16;
-        cardRect_ = QRectF(m, cardY, cw, cardH);
-
+        cardRect_ = QRectF(m + X0, cardY + Y0, cw, cardH);
+ 
         const int exprH = std::clamp(cardH / 5, 18, 26);
         QFont ef = exprLabel_->font();
         ef.setPixelSize(std::clamp(exprH - 6, 12, 17));
         exprLabel_->setFont(ef);
-        exprLabel_->setGeometry(m + pad, cardY + 8, cw - 2 * pad, exprH);
+        place(exprLabel_, m + pad, cardY + 8, cw - 2 * pad, exprH);
         const int dispY = cardY + 8 + exprH;
         const int dispH = std::max(30, cardH - (dispY - cardY) - 8);
-        display_->setGeometry(m + pad, dispY, cw - 2 * pad, dispH);
+        place(display_, m + pad, dispY, cw - 2 * pad, dispH);
         maxFont_ = std::clamp(int(dispH * 0.78), 28, std::max(28, int(minSide * 0.2)));
         fitDisplayFont();
-
+ 
         // --- режим конвертера: две карточки (ввод и результат) ---
         const int gap = 10;
         const int h2 = std::max(30, (cardH - gap) / 2);
-        cardTop_ = QRectF(m, cardY, cw, h2);
-        cardBottom_ = QRectF(m, cardY + h2 + gap, cw, h2);
+        cardTop_ = QRectF(m + X0, cardY + Y0, cw, h2);
+        cardBottom_ = QRectF(m + X0, cardY + Y0 + h2 + gap, cw, h2);
         const int sw = land ? 28 : 36;
         const int uw = std::clamp(cw / 4, 78, 130);
         const int vx = m + pad + sw;
         const int vw = std::max(40, m + cw - pad - uw - 8 - vx);
-        topVal_->setGeometry(vx, cardY, vw, h2);
-        topUnit_->setGeometry(m + cw - pad - uw, cardY, uw, h2);
-        bottomVal_->setGeometry(vx, cardY + h2 + gap, vw, h2);
-        bottomUnit_->setGeometry(m + cw - pad - uw, cardY + h2 + gap, uw, h2);
-        swapBtn_->setGeometry(m + pad - 6, cardY + h2 + gap / 2 - sw / 2, sw, sw);
+        place(topVal_, vx, cardY, vw, h2);
+        place(topUnit_, m + cw - pad - uw, cardY, uw, h2);
+        place(bottomVal_, vx, cardY + h2 + gap, vw, h2);
+        place(bottomUnit_, m + cw - pad - uw, cardY + h2 + gap, uw, h2);
+        place(swapBtn_, m + pad - 6, cardY + h2 + gap / 2 - sw / 2, sw, sw);
         convFont_ = std::clamp(int(h2 * 0.5), 20, std::max(20, int(minSide * 0.12)));
         QFont uf = topUnit_->font();
         uf.setPixelSize(std::clamp(int(h2 * 0.26), 13, 22));
         topUnit_->setFont(uf);
         bottomUnit_->setFont(uf);
-
+ 
         updateConverter();
         setExpr(QString::fromUtf8(tracker_.header().c_str()));
         update();
     }
-
+ 
+    // Отступы под вырез экрана, Dynamic Island и индикатор «домой» (iPhone), системные панели (Android)
+    QMargins safeInsets() const {
+#if defined(Q_OS_IOS) || defined(Q_OS_ANDROID)
+        int top = 0, bottom = 0, left = 0, right = 0;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+        if (windowHandle()) {
+            const QMargins mg = windowHandle()->safeAreaMargins();
+            top = mg.top(); bottom = mg.bottom(); left = mg.left(); right = mg.right();
+        }
+#endif
+        QScreen* sc = screen();
+        if (top == 0 && bottom == 0 && left == 0 && right == 0 && sc) {
+            const QRect g = sc->geometry(), a = sc->availableGeometry();
+            top = a.top() - g.top();
+            bottom = g.bottom() - a.bottom();
+            left = a.left() - g.left();
+            right = g.right() - a.right();
+        }
+#ifdef Q_OS_IOS
+        if (top <= 0 && bottom <= 0 && left <= 0 && right <= 0 && sc) {  // Qt не сообщил отступы: типовые значения iPhone
+            const QSize sz = sc->geometry().size();
+            const int longSide = std::max(sz.width(), sz.height());
+            const int shortSide = std::min(sz.width(), sz.height());
+            const bool portrait = sz.height() >= sz.width();
+            if (shortSide >= 700) {                    // iPad
+                top = 24; bottom = 20;
+            } else if (longSide >= 812) {              // iPhone с вырезом или Dynamic Island
+                const int cut = (longSide >= 852) ? 59 : 47;
+                if (portrait) { top = cut; bottom = 34; }
+                else { left = right = cut; bottom = 21; }
+            } else if (portrait) {                     // iPhone с кнопкой «домой»
+                top = 20;
+            }
+        }
+#endif
+        return QMargins(std::max(left, 0), std::max(top, 0), std::max(right, 0), std::max(bottom, 0));
+#else
+        return QMargins();
+#endif
+    }
+ 
     void setExpr(const QString& t) {
         const QFontMetrics fm(exprLabel_->font());
         exprLabel_->setText(fm.elidedText(t, Qt::ElideLeft, std::max(20, exprLabel_->width() - 4)));
     }
-
+ 
     static void fitLabel(QLabel* l, int maxPx, int minPx) {
         QFont f = l->font();
         const QString t = l->text();
@@ -1015,22 +1064,22 @@ private:
         f.setPixelSize(px);
         l->setFont(f);
     }
-
+ 
     void fitDisplayFont() { fitLabel(display_, maxFont_, 22); }
-
+ 
     // ---------- режим «Конвертер» ----------
     int catCount() const { return 2 + int(units::categories().size()); }
-
+ 
     QString catTitle(int c) const {
         if (c == 0) return QStringLiteral("Валюта");
         if (c == 1) return QStringLiteral("Крипто");
         return QString::fromUtf8(units::categories()[c - 2].title);
     }
-
+ 
     // «деньги»: обычные валюты и крипто можно переводить друг в друга через доллар
     static bool isMoney(int cat) { return cat == 0 || cat == 1; }
     static bool compatible(int a, int b) { return a == b || (isMoney(a) && isMoney(b)); }
-
+ 
     // пара по умолчанию для категории
     void defaultPair(int cat, Sel& a, Sel& b) const {
         a.cat = b.cat = cat;
@@ -1046,7 +1095,7 @@ private:
             b.id = QString::fromUtf8(us[1].id);
         }
     }
-
+ 
     // цена одной единицы в долларах: монета (CoinGecko) или обычная валюта (курс НБУ)
     double usdPriceOf(const Sel& s) const {
         if (s.cat == 1) return crypto_.usdOf(s.id);
@@ -1054,7 +1103,7 @@ private:
         const double uahPerUnit = rates_.rateOf(s.id);
         return (uahPerUsd > 0 && uahPerUnit > 0) ? uahPerUnit / uahPerUsd : 0.0;
     }
-
+ 
     static QString cryptoInfoText(const CryptoInfo& c) {
         const std::string p = c.usd >= 1 ? E::formatFixed(c.usd, 2) : E::fmtNumber(c.usd);
         char b[32];
@@ -1063,7 +1112,7 @@ private:
         return QStringLiteral("$") + QString::fromUtf8(p.c_str()) + QStringLiteral("  ") +
                (c.change >= 0 ? QStringLiteral("\u25B2") : QStringLiteral("\u25BC")) + pct + QStringLiteral("%");
     }
-
+ 
     QVector<UnitItem> unitItems(int cat) const {
         QVector<UnitItem> out;
         if (cat == 0) {
@@ -1078,7 +1127,7 @@ private:
         }
         return out;
     }
-
+ 
     bool convertValue(double v, double& out) const {
         // единицы одной категории (длина, масса, ...)
         if (from_.cat >= 2 && from_.cat == to_.cat)
@@ -1093,7 +1142,7 @@ private:
         }
         return false;
     }
-
+ 
     void setConverter(bool on) {
         if (converter_ && !on) commitConversion();  // записываем конвертацию перед выходом
         converter_ = on;
@@ -1104,14 +1153,14 @@ private:
         layoutKeys();
         refresh();
     }
-
+ 
     void updateConverter() {
         if (!converter_) return;
         const QString chevron = QStringLiteral(" \u25BE");
         topUnit_->setText(from_.id + chevron);
         bottomUnit_->setText(to_.id + chevron);
         topVal_->setText(QString::fromUtf8(eng_.display().c_str()));
-
+ 
         QString bottom = QStringLiteral("\u2014");
         double out = 0;
         if (!eng_.inError() && convertValue(eng_.value(), out)) {
@@ -1123,7 +1172,7 @@ private:
         fitLabel(topVal_, convFont_, 16);
         fitLabel(bottomVal_, convFont_, 16);
     }
-
+ 
     // Окно выбора единиц: вкладки-категории, список, поиск
     void openPicker(bool editFrom) {
         commitConversion();
@@ -1142,7 +1191,7 @@ private:
             "              padding: 6px 14px; font-size: 15px; }"
             "QPushButton:checked { background: #6A5AF0; color: white; }"
             "QScrollArea { background: transparent; border: none; }"));
-
+ 
         auto* lay = new QVBoxLayout(&dlg);
         auto* scroll = new QScrollArea(&dlg);
         scroll->setWidgetResizable(true);
@@ -1160,12 +1209,12 @@ private:
         auto* search = new QLineEdit(&dlg);
         search->setPlaceholderText(QStringLiteral("Поиск по единицам"));
         search->setClearButtonEnabled(true);
-
+ 
         int viewCat = (editFrom ? from_ : to_).cat;
         int chosenCat = -1;
         QString chosenId;
         QVector<QPushButton*> tabs;
-
+ 
         auto fill = [&] {
             list->clear();
             const QString q = search->text().trimmed();
@@ -1183,7 +1232,7 @@ private:
                 if (sel) it->setForeground(QColor(0x9A, 0x8D, 0xFF));
             }
         };
-
+ 
         for (int c = 0; c < catCount(); ++c) {
             auto* b = new QPushButton(catTitle(c), tabsW);
             b->setCheckable(true);
@@ -1199,19 +1248,19 @@ private:
         }
         tabsL->addStretch();
         scroll->setWidget(tabsW);
-
+ 
         connect(search, &QLineEdit::textChanged, &dlg, [&] { fill(); });
         connect(list, &QListWidget::itemClicked, &dlg, [&](QListWidgetItem* it) {
             chosenId = it->data(Qt::UserRole).toString();
             chosenCat = viewCat;
             dlg.accept();
         });
-
+ 
         lay->addWidget(scroll);
         lay->addWidget(list, 1);
         lay->addWidget(search);
         fill();
-
+ 
         if (dlg.exec() == QDialog::Accepted && chosenCat >= 0) {
             Sel chosen;
             chosen.cat = chosenCat;
@@ -1228,7 +1277,7 @@ private:
         refresh();
         scheduleConvCommit();
     }
-
+ 
     // ---------- действия ----------
     void press(int idx) {
         const Key& k = keys_[idx];
@@ -1236,7 +1285,7 @@ private:
         refresh();
         scheduleConvCommit();
     }
-
+ 
     // Ввод с клавиатуры: найти соответствующую кнопку, подсветить и выполнить
     void trigger(Act a) {
         for (const Key& k : keys_) {
@@ -1249,7 +1298,7 @@ private:
         refresh();
         scheduleConvCommit();
     }
-
+ 
     static Ev toEv(A a) {
         switch (a) {
             case A::Digit:   return Ev::Digit;
@@ -1268,7 +1317,7 @@ private:
             default:         return Ev::Other;
         }
     }
-
+ 
     // Выполнить действие и записать его в историю (если вычисление завершено)
     void dispatch(Act a) {
         const ExprTracker::Pre pre = tracker_.before(eng_);
@@ -1282,7 +1331,7 @@ private:
             pushHistory(h);
         }
     }
-
+ 
     void doBackspace() {
         const ExprTracker::Pre pre = tracker_.before(eng_);
         eng_.backspace();
@@ -1290,7 +1339,7 @@ private:
         tracker_.after(Ev::Backspace, 0, pre, eng_, he);
         refresh();
     }
-
+ 
     void runEngine(Act a) {
         switch (a.a) {
             case A::Digit:    eng_.digit(a.arg); break;
@@ -1313,7 +1362,7 @@ private:
             case A::Angle:    eng_.toggleAngle(); break;
         }
     }
-
+ 
     // ---------- история ----------
     void pushHistory(HistoryItem h) {
         h.ts = QDateTime::currentSecsSinceEpoch();
@@ -1321,7 +1370,7 @@ private:
         while (history_.size() > 200) history_.removeLast();
         saveHistory();
     }
-
+ 
     void saveHistory() const {
         QJsonArray arr;
         for (const HistoryItem& h : history_) {
@@ -1340,7 +1389,7 @@ private:
         QSettings s;
         s.setValue("history", QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
     }
-
+ 
     void loadHistory() {
         QSettings s;
         const QJsonArray arr = QJsonDocument::fromJson(s.value("history").toString().toUtf8()).array();
@@ -1359,19 +1408,19 @@ private:
             if (!h.expr.isEmpty()) history_.push_back(h);
         }
     }
-
+ 
     // Конвертации записываются, когда ввод остановился (через 2,5 с), при смене единиц и выходе из режима
     void scheduleConvCommit() {
         if (converter_) convTimer_.start(2500);
     }
-
+ 
     void commitConversion() {
         convTimer_.stop();
         if (!converter_ || eng_.inError()) return;
         const double v = eng_.value();
         double out = 0;
         if (v == 0 || !convertValue(v, out)) return;
-
+ 
         HistoryItem h;
         h.conv = true;
         h.expr = QString::fromUtf8(eng_.display().c_str()) + QLatin1Char(' ') + from_.id;
@@ -1386,7 +1435,7 @@ private:
             return;  // такая запись уже есть
         pushHistory(h);
     }
-
+ 
     void restoreHistory(const HistoryItem& h) {
         tracker_.reset();
         if (h.conv) {
@@ -1403,7 +1452,7 @@ private:
         eng_.setValue(h.value);
         refresh();
     }
-
+ 
     void openHistory() {
         commitConversion();
         QDialog dlg(this);
@@ -1417,7 +1466,7 @@ private:
             "QListWidget::item:selected { background: #232833; }"
             "QPushButton { background: transparent; color: #8676FF; border: none; padding: 6px 14px;"
             "              font-size: 15px; }"));
-
+ 
         auto* lay = new QVBoxLayout(&dlg);
         auto* head = new QHBoxLayout;
         auto* clearBtn = new QPushButton(QStringLiteral("Очистить"), &dlg);
@@ -1434,7 +1483,7 @@ private:
         lay->addLayout(head);
         lay->addWidget(list, 1);
         lay->addWidget(empty, 1);
-
+ 
         int chosen = -1;
         auto fill = [&] {
             list->clear();
@@ -1468,49 +1517,50 @@ private:
         });
         fill();
         dlg.exec();
-
+ 
         if (chosen >= 0 && chosen < history_.size()) {
             const HistoryItem h = history_[chosen];  // копия: restore может изменить историю
             restoreHistory(h);
         }
     }
-
+ 
     void refresh() {
         display_->setText(QString::fromUtf8(eng_.display().c_str()));
         fitDisplayFont();
-
+ 
         const int active = eng_.activeOp();
         for (Key& k : keys_) {
             const Act& a = (second_ && k.hasSecond) ? k.act2 : k.act;
             bool hl = false;
             QString text = (second_ && k.hasSecond) ? k.label2 : k.label;
-
+ 
             if (k.act.a == A::Clear) text = eng_.showClear() ? "C" : "AC";
             if (k.act.a == A::Angle) text = eng_.isDeg() ? "Rad" : "Deg";
             if (k.act.a == A::LParen && eng_.parenDepth() > 0)
                 text = "(" + QString::number(eng_.parenDepth());
             if (k.act.a == A::Second) hl = second_;
             if (a.a == A::Binary && a.arg <= E::Div && !k.sci) hl = (a.arg == active);
-
+ 
             if (k.btn->text() != text) k.btn->setText(text);
             k.btn->setHighlighted(hl);
         }
-
+ 
         setExpr(QString::fromUtf8(tracker_.header().c_str()));
         updateConverter();
     }
 };
-
+ 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("IOSCalculator");
     QCoreApplication::setApplicationName("IOSCalculator");
-
+ 
     QFont f;
     f.setFamilies({"SF Pro Display", "Helvetica Neue", "Segoe UI", "Roboto", "Noto Sans", "Arial"});
     app.setFont(f);
-
+ 
     Calculator w;
     w.show();
     return app.exec();
 }
+ 
